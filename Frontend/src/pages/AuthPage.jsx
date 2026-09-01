@@ -17,39 +17,49 @@ export default function AuthPage() {
     navigate(r === 'admin' ? '/admin-dashboard' : '/user-dashboard', { replace: true });
   };
 
+  const resolveRoleAndRedirect = async (user, sessionToken) => {
+    let role = user.user_metadata?.role || null;
+
+    // 1. Direct Supabase query (instant)
+    try {
+      const { data: p } = await supabase
+        .from('user_profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (p?.role) role = p.role;
+    } catch (err) {
+      console.warn('Profile role fetch notice:', err);
+    }
+
+    // 2. Sync with backend API
+    if (!role) {
+      try {
+        const headers = sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {};
+        const res = await api.post('/signup', {
+          id: user.id,
+          email: user.email,
+          full_name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0],
+          avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture,
+        }, { headers });
+        if (res.data?.user?.role) role = res.data.user.role;
+      } catch (err) {
+        console.warn('Signup sync notice:', err);
+      }
+    }
+
+    redirectByRole(role || 'user');
+  };
+
   // Redirect if already logged in
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) return;
-      try {
-        const res = await api.get('/auth/me', {
-          headers: { Authorization: `Bearer ${session.access_token}` }
-        });
-        redirectByRole(res.data?.user?.role || 'user');
-      } catch {
-        const { data: profile } = await supabase
-          .from('user_profiles').select('role').eq('id', session.user.id).maybeSingle();
-        redirectByRole(profile?.role || 'user');
-      }
+      await resolveRoleAndRedirect(session.user, session.access_token);
     };
     checkSession();
   }, []); // eslint-disable-line
-
-  const syncAndRedirect = async (user) => {
-    try {
-      const payload = {
-        id: user.id,
-        email: user.email,
-        full_name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0],
-        avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture,
-      };
-      const res = await api.post('/signup', payload);
-      redirectByRole(res.data.user?.role || 'user');
-    } catch {
-      redirectByRole('user');
-    }
-  };
 
   const handleGoogleLogin = async () => {
     setLoading(true);
@@ -82,23 +92,15 @@ export default function AuthPage() {
         });
         if (err) throw err;
         if (data.user) {
-          await syncAndRedirect(data.user);
+          const token = data.session?.access_token;
+          await resolveRoleAndRedirect(data.user, token);
         }
       } else {
         const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
         if (err) throw err;
         if (data.user) {
-          try {
-            const res = await api.post('/signup', {
-              id: data.user.id,
-              email: data.user.email,
-              full_name: data.user.user_metadata?.full_name,
-              avatar_url: data.user.user_metadata?.avatar_url,
-            });
-            redirectByRole(res.data.user?.role || 'user');
-          } catch {
-            redirectByRole('user');
-          }
+          const token = data.session?.access_token;
+          await resolveRoleAndRedirect(data.user, token);
         }
       }
     } catch (err) {

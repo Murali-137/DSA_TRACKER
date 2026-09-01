@@ -246,6 +246,11 @@ export default function UserDashboard() {
 
         if (!userRole) userRole = session.user.user_metadata?.role || 'user';
 
+        if (userRole === 'admin') {
+          navigate('/admin-dashboard', { replace: true });
+          return;
+        }
+
         const u = {
           id: session.user.id,
           email: session.user.email,
