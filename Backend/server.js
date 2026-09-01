@@ -18,14 +18,18 @@ app.use((req, res, next) => {
 });
 
 // Health check
-app.get('/api/health', (req, res) => {
+app.get(['/health', '/api/health'], (req, res) => {
   res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-// API Routes
+// API Routes (support both /api prefixed routes and direct routes)
 app.use('/api', authRoutes);
 app.use('/api', problemRoutes);
 app.use('/api/admin', adminRoutes);
+
+app.use('/', authRoutes);
+app.use('/', problemRoutes);
+app.use('/admin', adminRoutes);
 
 // Global Error Handler
 app.use((err, req, res, next) => {
