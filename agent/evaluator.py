@@ -7,7 +7,7 @@ load_dotenv()
 
 # ─── Groq Client ──────────────────────────────────────────────────────────────
 client = ChatGroq(
-    model="llama3-70b-8192",
+    model="openai/gpt-oss-120b",
     api_key=os.getenv("GROQ_API_KEY"),
     temperature=0.0,   # zero temp = deterministic, consistent scoring
 )
@@ -121,7 +121,8 @@ def run_code(code: str, language: str, sample_input: str) -> dict:
     elif lang in ('javascript', 'js', 'typescript', 'ts'):
         return run_javascript(code, sample_input)
     else:
-        return {'actual_output': None, 'error': f'Execution skipped for {language}', 'timed_out': False}
+        # For Java, C++, Go etc. - perform static analysis
+        return {'actual_output': None, 'error': '', 'timed_out': False}
 
 
 def normalize(text: str) -> str:
@@ -142,29 +143,27 @@ def evaluate_code(
 
     # Step 1: Run the code
     exec_result = run_code(code, language, sample_input)
-    actual    = exec_result.get('actual_output', '')
+    actual    = exec_result.get('actual_output')
     exec_err  = exec_result.get('error', '')
     timed_out = exec_result.get('timed_out', False)
 
     # Step 2: Determine pass/fail or function-only status
-    has_output = bool(actual and actual.strip())
-    
     if timed_out:
         test_result_text = "⏱ TEST EXECUTION: TIME LIMIT EXCEEDED (Code took too long)."
         passed = False
-    elif exec_err and not has_output:
-        test_result_text = f"❌ TEST EXECUTION: RUNTIME ERROR:\n{exec_err[:300]}"
+    elif exec_err and exec_err.strip():
+        test_result_text = f"❌ TEST EXECUTION: RUNTIME/COMPILATION ERROR:\n{exec_err[:300]}"
         passed = False
-    elif has_output and sample_output:
+    elif actual is not None and sample_output:
         passed = normalize(actual) == normalize(sample_output)
         if passed:
             test_result_text = f"✅ TEST EXECUTION: PASSED\nExpected: {sample_output.strip()}\nGot: {actual}"
         else:
             test_result_text = f"❌ TEST EXECUTION: OUTPUT MISMATCH\nExpected: {sample_output.strip()}\nGot: {actual}"
     else:
-        # Function/Class structure without standalone print/I/O execution
+        # Function/Class structure or language without dynamic runner
         passed = None
-        test_result_text = "ℹ TEST EXECUTION: Function/Class definition provided. Evaluate logical correctness and complexity directly from the code implementation."
+        test_result_text = f"ℹ TEST EXECUTION: Implementation provided in {language.upper()}. Evaluate the methods/functions directly for algorithmic correctness and time/space complexity."
 
     # Step 3: Build prompt
     prompt = f"""
